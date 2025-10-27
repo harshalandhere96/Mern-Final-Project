@@ -12,7 +12,8 @@ const SignUp = () => {
   const { showNotification } = useNotification();
 
   const [formData, setFormData] = useState({
-    name: '',
+    firstName: '',      // Changed from 'name'
+    lastName: '',       // Added
     email: '',
     password: '',
     confirmPassword: '',
@@ -40,11 +41,18 @@ const SignUp = () => {
   const validateForm = () => {
     const newErrors = {};
 
-    // Name validation
-    if (!formData.name.trim()) {
-      newErrors.name = 'Name is required';
-    } else if (formData.name.trim().length < 2) {
-      newErrors.name = 'Name must be at least 2 characters';
+    // First name validation
+    if (!formData.firstName.trim()) {
+      newErrors.firstName = 'First name is required';
+    } else if (formData.firstName.trim().length < 2) {
+      newErrors.firstName = 'First name must be at least 2 characters';
+    }
+
+    // Last name validation
+    if (!formData.lastName.trim()) {
+      newErrors.lastName = 'Last name is required';
+    } else if (formData.lastName.trim().length < 2) {
+      newErrors.lastName = 'Last name must be at least 2 characters';
     }
 
     // Email validation
@@ -96,11 +104,14 @@ const SignUp = () => {
 
     try {
       const userData = {
-        name: formData.name.trim(),
+        firstName: formData.firstName.trim(),
+        lastName: formData.lastName.trim(),
         email: formData.email.trim(),
         password: formData.password,
         phone: formData.phone.trim() || undefined
       };
+
+      console.log('Registering with data:', userData); // Debug log
 
       await register(userData);
       
@@ -121,10 +132,12 @@ const SignUp = () => {
       showNotification('Error', errorMessage, 'error');
       
       // Handle specific errors
-      if (error.response?.status === 409) {
-        setErrors({
-          email: 'This email is already registered'
-        });
+      if (error.response?.status === 409 || error.response?.status === 400) {
+        if (errorMessage.toLowerCase().includes('email')) {
+          setErrors({
+            email: errorMessage
+          });
+        }
       }
     } finally {
       setLoading(false);
@@ -136,7 +149,7 @@ const SignUp = () => {
       <div className="auth-container">
         <div className="auth-left">
           <div className="auth-logo">
-            <h1>🐕 WatchDogs</h1>
+            <h1>🕵 WatchDogs</h1>
             <p>Travel Safe, Stay Protected</p>
           </div>
           <div className="auth-features">
@@ -155,7 +168,7 @@ const SignUp = () => {
               </div>
             </div>
             <div className="feature">
-              <span className="feature-icon">🔐</span>
+              <span className="feature-icon">🔒</span>
               <div>
                 <h3>Secure & Private</h3>
                 <p>Your data is encrypted and protected</p>
@@ -178,13 +191,25 @@ const SignUp = () => {
 
             <form onSubmit={handleSubmit} className="auth-form">
               <Input
-                label="Full Name"
+                label="First Name"
                 type="text"
-                name="name"
-                value={formData.name}
+                name="firstName"
+                value={formData.firstName}
                 onChange={handleChange}
-                placeholder="Enter your full name"
-                error={errors.name}
+                placeholder="Enter your first name"
+                error={errors.firstName}
+                disabled={loading}
+                required
+              />
+
+              <Input
+                label="Last Name"
+                type="text"
+                name="lastName"
+                value={formData.lastName}
+                onChange={handleChange}
+                placeholder="Enter your last name"
+                error={errors.lastName}
                 disabled={loading}
                 required
               />

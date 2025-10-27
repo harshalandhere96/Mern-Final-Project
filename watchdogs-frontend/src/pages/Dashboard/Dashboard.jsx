@@ -246,7 +246,7 @@ const Dashboard = () => {
           </button>
           <button 
             className="action-btn digital-id"
-            onClick={() => navigate('/digital-id')}
+            onClick={() => navigate('/generate-digital-id')}
           >
             🆔 Digital ID
           </button>
