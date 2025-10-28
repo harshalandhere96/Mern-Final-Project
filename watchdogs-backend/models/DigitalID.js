@@ -10,7 +10,7 @@ const digitalIdSchema = new mongoose.Schema({
   idNumber: {
     type: String,
     unique: true,
-    required: true
+    // REMOVED required: true - This is auto-generated in pre-save hook
   },
   qrCode: {
     type: String, // Base64 encoded QR code
@@ -101,8 +101,8 @@ const digitalIdSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Generate unique ID number
-digitalIdSchema.pre('save', async function(next) {
+// Generate unique ID number BEFORE validation
+digitalIdSchema.pre('validate', function(next) {
   if (!this.idNumber) {
     const year = new Date().getFullYear();
     const random = Math.floor(Math.random() * 1000000).toString().padStart(6, '0');
