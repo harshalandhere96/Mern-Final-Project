@@ -1,316 +1,674 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { useNotification } from '../../context/NotificationContext';
-import digitalIdService from '../../services/digitalIdService';
 import './TravelDocs.css';
 
 const TravelDocs = () => {
   const { user } = useAuth();
-  const { showNotification } = useNotification();
 
-  const [digitalIds, setDigitalIds] = useState([]);
+  const [activeTab, setActiveTab] = useState('documents');
+  const [documents, setDocuments] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [selectedId, setSelectedId] = useState(null);
-  const [showQRCode, setShowQRCode] = useState(false);
-  const [qrCodeData, setQrCodeData] = useState(null);
+  const [filter, setFilter] = useState('all');
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [showViewModal, setShowViewModal] = useState(false);
+  const [selectedDoc, setSelectedDoc] = useState(null);
+  
+  const [uploadData, setUploadData] = useState({
+    documentType: 'passport',
+    documentName: '',
+    documentNumber: '',
+    issueCountry: '',
+    issueDate: '',
+    expiryDate: '',
+    provider: '',
+    notes: '',
+    file: null
+  });
+  const [uploading, setUploading] = useState(false);
 
   useEffect(() => {
-    loadDigitalIds();
-  }, []);
+    loadDocuments();
+  }, [filter]);
 
-  const loadDigitalIds = async () => {
+  const loadDocuments = async () => {
     try {
       setLoading(true);
-      const response = await digitalIdService.getUserDigitalIds();
-      setDigitalIds(response.digitalIds || []);
+      const token = localStorage.getItem('token');
+      
+      console.log('📥 Loading documents with filter:', filter);
+      
+      const queryParams = filter !== 'all' ? `?documentType=${filter}` : '';
+      
+      const response = await fetch(`http://localhost:5000/api/documents/list${queryParams}`, {
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      const data = await response.json();
+      console.log('✅ Documents loaded:', data);
+      
+      if (data.success) {
+        setDocuments(data.documents || []);
+      } else {
+        console.error('Failed to load documents:', data.message);
+        alert('Failed to load documents: ' + data.message);
+      }
     } catch (error) {
-      console.error('Failed to load Digital IDs:', error);
-      showNotification('Error', 'Failed to load your documents', 'error');
+      console.error('❌ Error loading documents:', error);
+      alert('Failed to load documents');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleViewDetails = (id) => {
-    setSelectedId(id);
+  const handleFileSelect = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    console.log('📄 File selected:', file.name, file.type, file.size);
+
+    // Validate file size (5MB max)
+    if (file.size > 5 * 1024 * 1024) {
+      alert('❌ File size must be less than 5MB');
+      return;
+    }
+
+    // Validate file type
+    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'application/pdf'];
+    if (!allowedTypes.includes(file.type)) {
+      alert('❌ Only JPG, PNG, and PDF files are allowed');
+      return;
+    }
+
+    setUploadData(prev => ({ ...prev, file }));
+    console.log('✅ File ready for upload');
   };
 
-  const handleGenerateQR = async (id) => {
+  const handleUploadChange = (e) => {
+    const { name, value } = e.target;
+    setUploadData(prev => ({
+      ...prev,
+      [name]: value
+    }));
+  };
+
+  const handleUploadDocument = async (e) => {
+    e.preventDefault();
+
+    console.log('📤 Uploading document:', uploadData);
+
+    if (!uploadData.file) {
+      alert('❌ Please select a file');
+      return;
+    }
+
+    if (!uploadData.documentName.trim()) {
+      alert('❌ Please enter document name');
+      return;
+    }
+
+    setUploading(true);
+
     try {
-      const response = await digitalIdService.generateQRCode(id);
-      setQrCodeData(response.qrCode);
-      setShowQRCode(true);
-      showNotification('Success', 'QR Code generated successfully', 'success');
+      const token = localStorage.getItem('token');
+      
+      // Create FormData
+      const formData = new FormData();
+      formData.append('document', uploadData.file);
+      formData.append('documentType', uploadData.documentType);
+      formData.append('documentName', uploadData.documentName.trim());
+      
+      if (uploadData.documentNumber) formData.append('documentNumber', uploadData.documentNumber);
+      if (uploadData.issueCountry) formData.append('issueCountry', uploadData.issueCountry);
+      if (uploadData.issueDate) formData.append('issueDate', uploadData.issueDate);
+      if (uploadData.expiryDate) formData.append('expiryDate', uploadData.expiryDate);
+      if (uploadData.provider) formData.append('provider', uploadData.provider);
+      if (uploadData.notes) formData.append('notes', uploadData.notes);
+
+      console.log('Uploading to server...');
+
+      const response = await fetch('http://localhost:5000/api/documents/upload', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        },
+        body: formData
+      });
+
+      const data = await response.json();
+      console.log('Response:', data);
+
+      if (data.success) {
+        console.log('✅ Document uploaded successfully');
+        alert('✅ Document uploaded successfully!');
+
+        // Reset form
+        setUploadData({
+          documentType: 'passport',
+          documentName: '',
+          documentNumber: '',
+          issueCountry: '',
+          issueDate: '',
+          expiryDate: '',
+          provider: '',
+          notes: '',
+          file: null
+        });
+
+        // Clear file input
+        const fileInput = document.getElementById('file-input');
+        if (fileInput) fileInput.value = '';
+
+        setShowUploadModal(false);
+        loadDocuments();
+      } else {
+        console.error('Upload failed:', data.message);
+        alert('❌ Failed to upload document: ' + data.message);
+      }
     } catch (error) {
-      console.error('Failed to generate QR code:', error);
-      showNotification('Error', 'Failed to generate QR code', 'error');
+      console.error('❌ Error uploading document:', error);
+      alert('Failed to upload document. Please try again.');
+    } finally {
+      setUploading(false);
     }
   };
 
-  const handleDownloadPDF = async (id) => {
+  const handleViewDocument = async (doc) => {
     try {
-      await digitalIdService.downloadAsPDF(id);
-      showNotification('Success', 'Digital ID downloaded successfully', 'success');
+      console.log('👁️ Viewing document:', doc.id);
+      
+      const token = localStorage.getItem('token');
+      
+      const response = await fetch(`http://localhost:5000/api/documents/${doc.id}`, {
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      const data = await response.json();
+      
+      if (data.success) {
+        setSelectedDoc(data.document);
+        setShowViewModal(true);
+      } else {
+        alert('Failed to load document details');
+      }
     } catch (error) {
-      console.error('Failed to download PDF:', error);
-      showNotification('Error', 'Failed to download PDF', 'error');
+      console.error('❌ Error viewing document:', error);
+      alert('Failed to view document');
     }
   };
 
-  const handleDelete = async (id) => {
-    if (!window.confirm('Are you sure you want to delete this Digital ID?')) {
+  const handleDownloadDocument = async (docId, fileName) => {
+    try {
+      console.log('⬇️ Downloading document:', docId);
+      
+      const token = localStorage.getItem('token');
+      
+      const response = await fetch(`http://localhost:5000/api/documents/${docId}/download`, {
+        headers: { 
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      
+      if (response.ok) {
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = fileName;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(url);
+        
+        console.log('✅ Document downloaded');
+        alert('✅ Document downloaded successfully!');
+      } else {
+        alert('Failed to download document');
+      }
+    } catch (error) {
+      console.error('❌ Error downloading document:', error);
+      alert('Failed to download document');
+    }
+  };
+
+  const handleDeleteDocument = async (docId) => {
+    if (!window.confirm('Are you sure you want to delete this document? This action cannot be undone.')) {
       return;
     }
 
     try {
-      await digitalIdService.deleteDigitalId(id);
-      setDigitalIds(prev => prev.filter(item => item._id !== id));
-      showNotification('Success', 'Digital ID deleted successfully', 'success');
+      console.log('🗑️ Deleting document:', docId);
       
-      if (selectedId?._id === id) {
-        setSelectedId(null);
+      const token = localStorage.getItem('token');
+      
+      const response = await fetch(`http://localhost:5000/api/documents/${docId}`, {
+        method: 'DELETE',
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      const data = await response.json();
+      
+      if (data.success) {
+        console.log('✅ Document deleted');
+        alert('✅ Document deleted successfully!');
+        setDocuments(prev => prev.filter(doc => doc.id !== docId));
+        setShowViewModal(false);
+      } else {
+        alert('Failed to delete document: ' + data.message);
       }
     } catch (error) {
-      console.error('Failed to delete Digital ID:', error);
-      showNotification('Error', 'Failed to delete Digital ID', 'error');
+      console.error('❌ Error deleting document:', error);
+      alert('Failed to delete document');
     }
   };
 
-  const handleShare = async (id) => {
-    const email = prompt('Enter email address to share with:');
-    if (!email) return;
-
-    try {
-      await digitalIdService.shareDigitalId(id, email);
-      showNotification('Success', 'Digital ID shared successfully', 'success');
-    } catch (error) {
-      console.error('Failed to share Digital ID:', error);
-      showNotification('Error', 'Failed to share Digital ID', 'error');
-    }
+  const getDocumentIcon = (type) => {
+    const icons = {
+      passport: '🛂',
+      visa: '✈️',
+      insurance: '🏥',
+      vaccination: '💉',
+      id: '🆔',
+      other: '📄'
+    };
+    return icons[type] || '📄';
   };
 
-  const renderIdCard = (id) => (
-    <div key={id._id} className="id-card" onClick={() => handleViewDetails(id)}>
-      <div className="id-card-header">
-        <div className="id-type">
-          <span className="id-icon">🆔</span>
-          <span>Digital ID</span>
+  const getStatusColor = (status) => {
+    const colors = {
+      valid: '#10b981',
+      'expiring-soon': '#f59e0b',
+      expired: '#ef4444',
+      unknown: '#6b7280'
+    };
+    return colors[status] || '#6b7280';
+  };
+
+  const getStatusText = (status) => {
+    const texts = {
+      valid: '✅ Valid',
+      'expiring-soon': '⚠️ Expiring Soon',
+      expired: '❌ Expired',
+      unknown: '❓ Unknown'
+    };
+    return texts[status] || 'Unknown';
+  };
+
+  const renderDocuments = () => (
+    <div className="documents-container">
+      <div className="documents-header">
+        <h3>📁 My Documents</h3>
+        <button 
+          className="upload-btn"
+          onClick={() => setShowUploadModal(true)}
+        >
+          ➕ Upload Document
+        </button>
+      </div>
+
+      <div className="filter-bar">
+        {['all', 'passport', 'visa', 'insurance', 'vaccination', 'id', 'other'].map(type => (
+          <button
+            key={type}
+            className={`filter-btn ${filter === type ? 'active' : ''}`}
+            onClick={() => setFilter(type)}
+          >
+            {getDocumentIcon(type)} {type.charAt(0).toUpperCase() + type.slice(1)}
+          </button>
+        ))}
+      </div>
+
+      {loading ? (
+        <div className="loading-state">
+          <div className="spinner"></div>
+          <p>Loading documents...</p>
         </div>
-        {id.verified && (
-          <span className="verified-badge">✓ Verified</span>
-        )}
-      </div>
+      ) : documents.length === 0 ? (
+        <div className="empty-state">
+          <div className="empty-icon">📭</div>
+          <h3>No documents found</h3>
+          <p>Upload your first document to get started</p>
+          <button
+            className="upload-btn-large"
+            onClick={() => setShowUploadModal(true)}
+          >
+            ➕ Upload Document
+          </button>
+        </div>
+      ) : (
+        <div className="documents-grid">
+          {documents.map(doc => (
+            <div 
+              key={doc.id} 
+              className="document-card"
+              onClick={() => handleViewDocument(doc)}
+            >
+              <div className="doc-icon-large">
+                {getDocumentIcon(doc.documentType)}
+              </div>
+              
+              <div className="doc-info">
+                <h4>{doc.documentName}</h4>
+                {doc.documentNumber && (
+                  <p className="doc-number">#{doc.documentNumber}</p>
+                )}
+                {doc.issueCountry && (
+                  <p className="doc-country">🌍 {doc.issueCountry}</p>
+                )}
+              </div>
 
-      <div className="id-card-photo">
-        {id.photo ? (
-          <img src={id.photo} alt={id.fullName} />
-        ) : (
-          <div className="photo-placeholder">👤</div>
-        )}
-      </div>
+              {doc.expiryDate && (
+                <div 
+                  className="doc-status"
+                  style={{ background: getStatusColor(doc.status) + '20', color: getStatusColor(doc.status) }}
+                >
+                  {getStatusText(doc.status)}
+                  {doc.daysToExpiry !== null && doc.daysToExpiry >= 0 && (
+                    <span className="days-left">
+                      {doc.daysToExpiry} days left
+                    </span>
+                  )}
+                </div>
+              )}
 
-      <div className="id-card-info">
-        <h3>{id.fullName}</h3>
-        <p className="id-number">{id.idNumber || 'N/A'}</p>
-        <p className="nationality">🌍 {id.nationality}</p>
-      </div>
+              <div className="doc-footer">
+                <small>Uploaded {new Date(doc.createdAt).toLocaleDateString()}</small>
+              </div>
 
-      <div className="id-card-actions">
-        <button
-          className="action-btn"
-          onClick={(e) => {
-            e.stopPropagation();
-            handleGenerateQR(id._id);
-          }}
-        >
-          📱 QR Code
-        </button>
-        <button
-          className="action-btn"
-          onClick={(e) => {
-            e.stopPropagation();
-            handleDownloadPDF(id._id);
-          }}
-        >
-          📄 Download
-        </button>
-        <button
-          className="action-btn"
-          onClick={(e) => {
-            e.stopPropagation();
-            handleShare(id._id);
-          }}
-        >
-          📤 Share
-        </button>
-        <button
-          className="action-btn delete"
-          onClick={(e) => {
-            e.stopPropagation();
-            handleDelete(id._id);
-          }}
-        >
-          🗑️ Delete
-        </button>
-      </div>
-
-      <div className="id-card-footer">
-        <small>Created: {new Date(id.createdAt).toLocaleDateString()}</small>
-      </div>
+              <div className="doc-actions" onClick={(e) => e.stopPropagation()}>
+                <button
+                  className="action-icon-btn"
+                  onClick={() => handleDownloadDocument(doc.id, doc.fileName)}
+                  title="Download"
+                >
+                  ⬇️
+                </button>
+                <button
+                  className="action-icon-btn delete"
+                  onClick={() => handleDeleteDocument(doc.id)}
+                  title="Delete"
+                >
+                  🗑️
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 
-  const renderDetails = () => {
-    if (!selectedId) return null;
+  const renderUploadModal = () => {
+    if (!showUploadModal) return null;
 
     return (
-      <div className="id-details-modal" onClick={() => setSelectedId(null)}>
-        <div className="id-details-content" onClick={(e) => e.stopPropagation()}>
-          <button className="close-btn" onClick={() => setSelectedId(null)}>×</button>
-          
-          <h2>Digital ID Details</h2>
+      <div className="modal-overlay" onClick={() => setShowUploadModal(false)}>
+        <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+          <button className="modal-close" onClick={() => setShowUploadModal(false)}>
+            ×
+          </button>
 
-          <div className="details-photo">
-            {selectedId.photo ? (
-              <img src={selectedId.photo} alt={selectedId.fullName} />
-            ) : (
-              <div className="photo-placeholder-large">👤</div>
+          <h2>📤 Upload Document</h2>
+
+          <form onSubmit={handleUploadDocument} className="upload-form">
+            <div className="form-group">
+              <label>Document Type *</label>
+              <select
+                name="documentType"
+                value={uploadData.documentType}
+                onChange={handleUploadChange}
+                required
+              >
+                <option value="passport">🛂 Passport</option>
+                <option value="visa">✈️ Visa</option>
+                <option value="insurance">🏥 Insurance</option>
+                <option value="vaccination">💉 Vaccination Certificate</option>
+                <option value="id">🆔 National ID</option>
+                <option value="other">📄 Other</option>
+              </select>
+            </div>
+
+            <div className="form-group">
+              <label>Document Name *</label>
+              <input
+                type="text"
+                name="documentName"
+                value={uploadData.documentName}
+                onChange={handleUploadChange}
+                placeholder="e.g., Indian Passport, US Visa"
+                required
+              />
+            </div>
+
+            <div className="form-row">
+              <div className="form-group">
+                <label>Document Number</label>
+                <input
+                  type="text"
+                  name="documentNumber"
+                  value={uploadData.documentNumber}
+                  onChange={handleUploadChange}
+                  placeholder="e.g., A1234567"
+                />
+              </div>
+
+              <div className="form-group">
+                <label>Issue Country</label>
+                <input
+                  type="text"
+                  name="issueCountry"
+                  value={uploadData.issueCountry}
+                  onChange={handleUploadChange}
+                  placeholder="e.g., India"
+                />
+              </div>
+            </div>
+
+            <div className="form-row">
+              <div className="form-group">
+                <label>Issue Date</label>
+                <input
+                  type="date"
+                  name="issueDate"
+                  value={uploadData.issueDate}
+                  onChange={handleUploadChange}
+                />
+              </div>
+
+              <div className="form-group">
+                <label>Expiry Date</label>
+                <input
+                  type="date"
+                  name="expiryDate"
+                  value={uploadData.expiryDate}
+                  onChange={handleUploadChange}
+                />
+              </div>
+            </div>
+
+            {uploadData.documentType === 'insurance' && (
+              <div className="form-group">
+                <label>Provider</label>
+                <input
+                  type="text"
+                  name="provider"
+                  value={uploadData.provider}
+                  onChange={handleUploadChange}
+                  placeholder="e.g., ICICI Lombard"
+                />
+              </div>
             )}
+
+            <div className="form-group">
+              <label>Notes</label>
+              <textarea
+                name="notes"
+                value={uploadData.notes}
+                onChange={handleUploadChange}
+                placeholder="Add any additional notes..."
+                rows={3}
+              />
+            </div>
+
+            <div className="form-group">
+              <label>Upload File * (JPG, PNG, PDF - Max 5MB)</label>
+              <input
+                id="file-input"
+                type="file"
+                accept=".jpg,.jpeg,.png,.pdf"
+                onChange={handleFileSelect}
+                required
+              />
+              {uploadData.file && (
+                <div className="file-selected">
+                  ✅ {uploadData.file.name} ({(uploadData.file.size / 1024).toFixed(2)} KB)
+                </div>
+              )}
+            </div>
+
+            <div className="form-actions">
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => setShowUploadModal(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="btn-primary"
+                disabled={uploading}
+              >
+                {uploading ? 'Uploading...' : '📤 Upload Document'}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    );
+  };
+
+  const renderViewModal = () => {
+    if (!showViewModal || !selectedDoc) return null;
+
+    return (
+      <div className="modal-overlay" onClick={() => setShowViewModal(false)}>
+        <div className="modal-content large" onClick={(e) => e.stopPropagation()}>
+          <button className="modal-close" onClick={() => setShowViewModal(false)}>
+            ×
+          </button>
+
+          <div className="view-header">
+            <div className="view-icon">
+              {getDocumentIcon(selectedDoc.documentType)}
+            </div>
+            <h2>{selectedDoc.documentName}</h2>
           </div>
 
-          <div className="details-info">
-            <div className="info-row">
-              <label>Full Name:</label>
-              <span>{selectedId.fullName}</span>
+          <div className="view-details">
+            <div className="detail-row">
+              <span className="detail-label">Type:</span>
+              <span className="detail-value">
+                {selectedDoc.documentType.charAt(0).toUpperCase() + selectedDoc.documentType.slice(1)}
+              </span>
             </div>
-            <div className="info-row">
-              <label>ID Number:</label>
-              <span>{selectedId.idNumber || 'N/A'}</span>
-            </div>
-            <div className="info-row">
-              <label>Date of Birth:</label>
-              <span>{new Date(selectedId.dateOfBirth).toLocaleDateString()}</span>
-            </div>
-            <div className="info-row">
-              <label>Nationality:</label>
-              <span>{selectedId.nationality}</span>
-            </div>
-            {selectedId.passportNumber && (
-              <div className="info-row">
-                <label>Passport Number:</label>
-                <span>{selectedId.passportNumber}</span>
+
+            {selectedDoc.documentNumber && (
+              <div className="detail-row">
+                <span className="detail-label">Document Number:</span>
+                <span className="detail-value">{selectedDoc.documentNumber}</span>
               </div>
             )}
-            <div className="info-row">
-              <label>Email:</label>
-              <span>{selectedId.email}</span>
-            </div>
-            <div className="info-row">
-              <label>Phone:</label>
-              <span>{selectedId.phone}</span>
-            </div>
-            {selectedId.address && (
-              <div className="info-row">
-                <label>Address:</label>
-                <span>{selectedId.address}</span>
+
+            {selectedDoc.issueCountry && (
+              <div className="detail-row">
+                <span className="detail-label">Issue Country:</span>
+                <span className="detail-value">{selectedDoc.issueCountry}</span>
               </div>
             )}
-            <div className="info-row">
-              <label>Status:</label>
-              <span className={selectedId.verified ? 'verified' : 'pending'}>
-                {selectedId.verified ? '✓ Verified' : '⏳ Pending'}
+
+            {selectedDoc.issueDate && (
+              <div className="detail-row">
+                <span className="detail-label">Issue Date:</span>
+                <span className="detail-value">
+                  {new Date(selectedDoc.issueDate).toLocaleDateString()}
+                </span>
+              </div>
+            )}
+
+            {selectedDoc.expiryDate && (
+              <div className="detail-row">
+                <span className="detail-label">Expiry Date:</span>
+                <span className="detail-value">
+                  {new Date(selectedDoc.expiryDate).toLocaleDateString()}
+                </span>
+              </div>
+            )}
+
+            {selectedDoc.provider && (
+              <div className="detail-row">
+                <span className="detail-label">Provider:</span>
+                <span className="detail-value">{selectedDoc.provider}</span>
+              </div>
+            )}
+
+            {selectedDoc.notes && (
+              <div className="detail-row">
+                <span className="detail-label">Notes:</span>
+                <span className="detail-value">{selectedDoc.notes}</span>
+              </div>
+            )}
+
+            <div className="detail-row">
+              <span className="detail-label">File Name:</span>
+              <span className="detail-value">{selectedDoc.fileName}</span>
+            </div>
+
+            <div className="detail-row">
+              <span className="detail-label">Uploaded:</span>
+              <span className="detail-value">
+                {new Date(selectedDoc.createdAt).toLocaleString()}
               </span>
             </div>
           </div>
 
-          <div className="details-actions">
-            <button onClick={() => handleGenerateQR(selectedId._id)}>
-              📱 Generate QR Code
+          <div className="view-actions">
+            <button
+              className="action-btn primary"
+              onClick={() => handleDownloadDocument(selectedDoc._id, selectedDoc.fileName)}
+            >
+              ⬇️ Download
             </button>
-            <button onClick={() => handleDownloadPDF(selectedId._id)}>
-              📄 Download PDF
-            </button>
-            <button onClick={() => handleShare(selectedId._id)}>
-              📤 Share
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  const renderQRModal = () => {
-    if (!showQRCode || !qrCodeData) return null;
-
-    return (
-      <div className="qr-modal" onClick={() => setShowQRCode(false)}>
-        <div className="qr-modal-content" onClick={(e) => e.stopPropagation()}>
-          <button className="close-btn" onClick={() => setShowQRCode(false)}>×</button>
-          
-          <h2>Digital ID QR Code</h2>
-          <p>Scan this QR code to verify your Digital ID</p>
-
-          <div className="qr-code-display">
-            <img src={qrCodeData} alt="QR Code" />
-          </div>
-
-          <div className="qr-actions">
-            <button onClick={() => {
-              const link = document.createElement('a');
-              link.href = qrCodeData;
-              link.download = 'digital-id-qr.png';
-              link.click();
-            }}>
-              💾 Download QR Code
+            <button
+              className="action-btn danger"
+              onClick={() => handleDeleteDocument(selectedDoc._id)}
+            >
+              🗑️ Delete
             </button>
           </div>
         </div>
       </div>
     );
   };
-
-  if (loading) {
-    return (
-      <div className="travel-docs-loading">
-        <div className="spinner"></div>
-        <p>Loading your documents...</p>
-      </div>
-    );
-  }
 
   return (
     <div className="travel-docs">
-      <div className="docs-header">
-        <h2>📄 Travel Documents</h2>
-        <p>Manage your Digital IDs and travel documents</p>
-        <button
-          className="create-btn"
-          onClick={() => window.location.href = '/digital-id'}
-        >
-          ➕ Create New Digital ID
-        </button>
+      <div className="docs-page-header">
+        <h1>📚 DigiLocker</h1>
+        <p>Securely store and manage all your travel documents in one place</p>
       </div>
 
-      {digitalIds.length === 0 ? (
-        <div className="empty-state">
-          <div className="empty-icon">📄</div>
-          <h3>No Digital IDs Yet</h3>
-          <p>Create your first Digital ID to get started</p>
-          <button
-            className="create-btn-large"
-            onClick={() => window.location.href = '/digital-id'}
-          >
-            ➕ Create Digital ID
-          </button>
-        </div>
-      ) : (
-        <div className="ids-grid">
-          {digitalIds.map(id => renderIdCard(id))}
-        </div>
-      )}
-
-      {renderDetails()}
-      {renderQRModal()}
+      {renderDocuments()}
+      {renderUploadModal()}
+      {renderViewModal()}
     </div>
   );
 };

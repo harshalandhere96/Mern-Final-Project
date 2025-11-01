@@ -5,7 +5,7 @@ import './DigitalIDGenerationPage.css';
 
 const DigitalIDGenerationPage = () => {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, updateUser } = useAuth();
   const [step, setStep] = useState(1);
   const [hasDigitalId, setHasDigitalId] = useState(false);
   const [digitalId, setDigitalId] = useState(null);
@@ -48,10 +48,14 @@ const DigitalIDGenerationPage = () => {
   const checkDigitalId = async () => {
     try {
       const token = localStorage.getItem('token');
+      console.log('🔍 Checking for existing digital ID...');
+      
       const response = await fetch('http://localhost:5000/api/digital-id/status', {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const data = await response.json();
+      
+      console.log('Status response:', data);
       
       if (data.hasDigitalId) {
         // Fetch full digital ID
@@ -59,8 +63,21 @@ const DigitalIDGenerationPage = () => {
           headers: { 'Authorization': `Bearer ${token}` }
         });
         const idData = await idResponse.json();
-        setDigitalId(idData.digitalId);
-        setHasDigitalId(true);
+        
+        console.log('Digital ID data:', idData);
+        
+        if (idData.success) {
+          setDigitalId(idData.digitalId);
+          setHasDigitalId(true);
+          
+          // Update user context with digitalId reference
+          if (updateUser && user) {
+            updateUser({
+              ...user,
+              digitalId: idData.digitalId._id
+            });
+          }
+        }
       }
     } catch (error) {
       console.error('Error checking digital ID:', error);
@@ -95,52 +112,91 @@ const DigitalIDGenerationPage = () => {
     }));
   };
 
-  const handleFileUpload = async (file, section, field) => {
-    if (!file) return;
+  const handleFileUpload = async (file, section, field, index = 0) => {
+    console.log('🔍 handleFileUpload called');
+    console.log('File:', file);
+    console.log('Section:', section);
+    console.log('Field:', field);
+    console.log('Index:', index);
     
-    // Validate file size (max 5MB)
-    if (file.size > 5 * 1024 * 1024) {
+    if (!file) {
+      console.log('❌ No file selected');
+      alert('Please select a file');
+      return;
+    }
+    
+    console.log('File details:');
+    console.log('- Name:', file.name);
+    console.log('- Size:', file.size, 'bytes');
+    console.log('- Type:', file.type);
+    
+    // Validate file size (max 10MB for PDFs, 5MB for images)
+    const maxSize = file.type === 'application/pdf' ? 10 * 1024 * 1024 : 5 * 1024 * 1024;
+    const maxSizeMB = file.type === 'application/pdf' ? '10MB' : '5MB';
+    
+    if (file.size > maxSize) {
+      console.log('❌ File too large');
       setErrors(prev => ({
         ...prev,
-        [`${section}.${field}`]: 'File size must be less than 5MB'
+        [`${section}.${field}`]: `File size must be less than ${maxSizeMB}`
       }));
+      alert(`File is too large. Maximum size is ${maxSizeMB}`);
       return;
     }
 
-    // Validate file type
-    if (!file.type.startsWith('image/')) {
+    // Validate file type (images and PDFs)
+    const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', 'application/pdf'];
+    if (!validTypes.includes(file.type)) {
+      console.log('❌ Invalid file type:', file.type);
       setErrors(prev => ({
         ...prev,
-        [`${section}.${field}`]: 'Only image files are allowed'
+        [`${section}.${field}`]: 'Only images (JPG, PNG, GIF, WebP) and PDF files are allowed'
       }));
+      alert('Invalid file type. Please upload an image or PDF file.');
       return;
     }
+
+    console.log('✅ File validation passed, converting to base64...');
 
     // Convert to base64
     const reader = new FileReader();
+    
     reader.onloadend = () => {
+      console.log('✅ File converted to base64');
+      console.log('Base64 length:', reader.result?.length);
+      console.log('Data URL prefix:', reader.result?.substring(0, 50));
+      
       if (section === 'personalInfo') {
         setFormData(prev => ({
           ...prev,
           personalInfo: { ...prev.personalInfo, [field]: reader.result }
         }));
-      } else {
+        console.log('✅ Photo saved to personalInfo');
+      } else if (section === 'kycDocuments') {
         const newDocs = [...formData.kycDocuments];
-        newDocs[0] = { ...newDocs[0], [field]: reader.result };
+        newDocs[index] = { ...newDocs[index], [field]: reader.result };
         setFormData(prev => ({ ...prev, kycDocuments: newDocs }));
+        console.log(`✅ Document image saved to kycDocuments[${index}]`);
       }
+      
       // Clear error
       setErrors(prev => ({
         ...prev,
         [`${section}.${field}`]: null
       }));
+      
+      alert('✅ File uploaded successfully!');
     };
+    
     reader.onerror = () => {
+      console.log('❌ Failed to read file');
       setErrors(prev => ({
         ...prev,
         [`${section}.${field}`]: 'Failed to read file'
       }));
+      alert('Failed to read file. Please try again.');
     };
+    
     reader.readAsDataURL(file);
   };
 
@@ -208,7 +264,7 @@ const DigitalIDGenerationPage = () => {
     if (currentStep === 4) {
       // Validate PIN
       if (!formData.accessPin) {
-        newErrors['accessPin'] = 'Access PIN is required';
+        newErrors['accessPin'] = '6-digit PIN is required';
       } else if (!/^\d{6}$/.test(formData.accessPin)) {
         newErrors['accessPin'] = 'PIN must be exactly 6 digits';
       }
@@ -219,14 +275,23 @@ const DigitalIDGenerationPage = () => {
   };
 
   const handleNext = () => {
+    console.log('🔄 Moving to next step from step', step);
     if (validateStep(step)) {
       setStep(step + 1);
+      console.log('✅ Validation passed, moving to step', step + 1);
     } else {
+      console.log('❌ Validation failed');
       alert('Please fix the errors before proceeding');
     }
   };
 
+  const handleBack = () => {
+    setStep(step - 1);
+  };
+
   const handleSubmit = async () => {
+    console.log('📤 Submitting Digital ID...');
+    
     // Final validation
     if (!validateStep(4)) {
       alert('Please fix the errors before submitting');
@@ -280,9 +345,21 @@ const DigitalIDGenerationPage = () => {
 
       const data = await response.json();
       
+      console.log('Response:', data);
+      
       if (response.ok && data.success) {
+        console.log('✅ Digital ID generated successfully!');
         setDigitalId(data.digitalId);
         setHasDigitalId(true);
+        
+        // Update user context
+        if (updateUser && user) {
+          updateUser({
+            ...user,
+            digitalId: data.digitalId._id
+          });
+        }
+        
         alert('✅ Digital ID generated successfully!');
       } else {
         // Show detailed error message
@@ -311,18 +388,48 @@ const DigitalIDGenerationPage = () => {
     }
   };
 
+  const handleUpdateInformation = () => {
+    console.log('✏️ Entering edit mode...');
+    
+    // Pre-fill form with existing data
+    if (digitalId) {
+      setFormData({
+        personalInfo: digitalId.personalInfo || formData.personalInfo,
+        kycDocuments: digitalId.kycDocuments?.length > 0 ? digitalId.kycDocuments : formData.kycDocuments,
+        travelInfo: digitalId.travelInfo || formData.travelInfo,
+        accessPin: '' // Don't pre-fill PIN for security
+      });
+    }
+    
+    // Switch to edit mode
+    setHasDigitalId(false);
+    setStep(1);
+  };
+
   const downloadQR = () => {
-    if (!digitalId?.qrCode) return;
-    const link = document.createElement('a');
-    link.href = digitalId.qrCode
-    link.download = `watchdogs-digital-id-${digitalId.idNumber}.png`;
-    link.click();
+    if (!digitalId?.qrCode) {
+      alert('QR code not available');
+      return;
+    }
+    
+    try {
+      const link = document.createElement('a');
+      link.href = digitalId.qrCode;
+      link.download = `watchdogs-digital-id-${digitalId.idNumber}.png`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      console.log('✅ QR code downloaded');
+    } catch (error) {
+      console.error('Error downloading QR:', error);
+      alert('Failed to download QR code');
+    }
   };
 
   if (loading) {
     return (
       <div className="digital-id-page">
-        <div className="loading">
+        <div className="loading-container">
           <div className="spinner"></div>
           <p>Loading...</p>
         </div>
@@ -330,139 +437,89 @@ const DigitalIDGenerationPage = () => {
     );
   }
 
+  // Display existing Digital ID
   if (hasDigitalId && digitalId) {
     return (
       <div className="digital-id-page">
         <div className="digital-id-card">
-          <div className="id-header">
-            <h1>🛂 WatchDogs Digital ID</h1>
-            <span className={`status-badge ${digitalId.verificationStatus}`}>
+          <div className="card-header">
+            <h1>🆔 WatchDogs Digital ID</h1>
+            <span className={`status-badge status-${digitalId.verificationStatus}`}>
               {digitalId.verificationStatus}
             </span>
           </div>
 
-          <div className="id-content">
-            <div className="id-main">
-              <div className="profile-section">
-                {digitalId.personalInfo.photo && (
-                  <img 
-                    src={digitalId.personalInfo.photo} 
-                    alt="Profile" 
-                    className="profile-photo"
-                  />
-                )}
-                <div className="profile-info">
-                  <h2>{digitalId.personalInfo.firstName} {digitalId.personalInfo.lastName}</h2>
-                  <p className="id-number">ID: {digitalId.idNumber}</p>
-                  <p>Nationality: {digitalId.personalInfo.nationality}</p>
-                  <p>DOB: {new Date(digitalId.personalInfo.dateOfBirth).toLocaleDateString()}</p>
-                </div>
-              </div>
+          <div className="id-info">
+            <h2>{digitalId.personalInfo.firstName} {digitalId.personalInfo.lastName}</h2>
+            <p className="id-number">ID: {digitalId.idNumber}</p>
+          </div>
 
-              <div className="verification-progress">
-                <h3>Verification Progress</h3>
-                <div className="progress-bar">
-                  <div 
-                    className="progress-fill" 
-                    style={{ width: `${digitalId.verificationPercentage || 0}%` }}
-                  ></div>
-                </div>
-                <p>{digitalId.verificationPercentage || 0}% Complete</p>
-              </div>
+          <div className="verification-progress">
+            <h3>Verification Progress</h3>
+            <div className="progress-bar">
+              <div 
+                className="progress-fill" 
+                style={{ width: `${digitalId.verificationPercentage || 0}%` }}
+              ></div>
+            </div>
+          </div>
 
-              <div className="kyc-documents">
-                <h3>📄 KYC Documents</h3>
-                {digitalId.kycDocuments.map((doc, index) => (
-                  <div key={index} className="document-item">
-                    <span className="doc-type">{doc.documentType.toUpperCase()}</span>
-                    <span className="doc-number">{doc.documentNumber}</span>
-                    {doc.isVerified && <span className="verified-badge">✓ Verified</span>}
-                  </div>
-                ))}
-              </div>
-
-              <div className="travel-info">
-                <h3>✈️ Travel Information</h3>
-                {digitalId.travelInfo.entryPoint && (
-                  <>
-                    <p><strong>Entry Point:</strong> {digitalId.travelInfo.entryPoint}</p>
-                    <p><strong>Entry Type:</strong> {digitalId.travelInfo.entryType}</p>
-                    <p><strong>Purpose:</strong> {digitalId.travelInfo.purposeOfVisit}</p>
-                    {digitalId.travelInfo.entryDate && (
-                      <p><strong>Entry Date:</strong> {new Date(digitalId.travelInfo.entryDate).toLocaleDateString()}</p>
-                    )}
-                  </>
-                )}
-              </div>
-
-              <div className="usage-stats">
-                <h3>📊 Usage Statistics</h3>
-                <div className="stats-grid">
-                  <div className="stat-item">
-                    <span className="stat-value">
-                      {digitalId.usageCount || 0}
-                    </span>
-                    <span className="stat-label">Times Used</span>
-                  </div>
-                  <div className="stat-item">
-                    <span className="stat-value">
-                      {digitalId.lastUsed ? new Date(digitalId.lastUsed).toLocaleDateString() : 'Never'}
-                    </span>
-                    <span className="stat-label">Last Used</span>
-                  </div>
-                  <div className="stat-item">
-                    <span className="stat-value">
-                      {digitalId.expiresAt ? new Date(digitalId.expiresAt).toLocaleDateString() : 'N/A'}
-                    </span>
-                    <span className="stat-label">Expires On</span>
-                  </div>
-                </div>
-              </div>
+          <div className="id-sections">
+            <div className="id-section">
+              <h3>📋 KYC Documents</h3>
+              {digitalId.kycDocuments?.length > 0 ? (
+                <p>✅ {digitalId.kycDocuments.length} document(s) uploaded</p>
+              ) : (
+                <p>⚠️ No documents uploaded</p>
+              )}
             </div>
 
-            <div className="id-sidebar">
-              <div className="qr-section">
-                <h3>Your QR Code</h3>
-                {digitalId.qrCode && (
-                  <div className="qr-code">
-                    <img 
-                      src={digitalId.qrCode} 
-                      alt="QR Code"
-                    />
-                  </div>
-                )}
-                <button onClick={downloadQR} className="btn-secondary">
-                  Download QR
-                </button>
-              </div>
+            <div className="id-section">
+              <h3>✈️ Travel Information</h3>
+              {digitalId.travelInfo?.entryPoint ? (
+                <p>✅ Travel info completed</p>
+              ) : (
+                <p>⚠️ Travel info incomplete</p>
+              )}
+            </div>
+          </div>
 
-              <div className="recent-checkpoints">
-                <h3>Recent Checkpoints</h3>
-                {digitalId.checkpoints && digitalId.checkpoints.length > 0 ? (
-                  <div className="checkpoint-list">
-                    {digitalId.checkpoints.slice(-5).reverse().map((cp, idx) => (
-                      <div key={idx} className="checkpoint-item">
-                        <span className="checkpoint-location">{cp.location}</span>
-                        <span className="checkpoint-type">{cp.checkpointType}</span>
-                        <span className="checkpoint-time">
-                          {new Date(cp.timestamp).toLocaleString()}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="no-checkpoints">No checkpoints yet</p>
-                )}
+          <div className="usage-stats">
+            <h3>📊 Usage Statistics</h3>
+            <div className="stats-grid">
+              <div className="stat">
+                <span className="stat-value">{digitalId.usageCount || 0}</span>
+                <span className="stat-label">TIMES USED</span>
+              </div>
+              <div className="stat">
+                <span className="stat-value">{digitalId.lastUsed ? 'Never' : new Date(digitalId.lastUsed).toLocaleDateString()}</span>
+                <span className="stat-label">LAST USED</span>
+              </div>
+              <div className="stat">
+                <span className="stat-value">{new Date(digitalId.expiresAt).toLocaleDateString()}</span>
+                <span className="stat-label">EXPIRES ON</span>
               </div>
             </div>
           </div>
 
-          <div className="id-actions">
+          {digitalId.qrCode && (
+            <div className="qr-section">
+              <h3>QR Code</h3>
+              <div className="qr-code">
+                <img src={digitalId.qrCode} alt="QR Code" />
+              </div>
+              <button onClick={downloadQR} className="btn-download">
+                📥 Download QR
+              </button>
+            </div>
+          )}
+
+          <div className="card-actions">
             <button onClick={() => navigate('/dashboard')} className="btn-secondary">
               Back to Dashboard
             </button>
-            <button onClick={() => {/* Implement update */}} className="btn-primary">
-              Update Information
+            <button onClick={handleUpdateInformation} className="btn-primary">
+              ✏️ Update Information
             </button>
           </div>
         </div>
@@ -470,359 +527,396 @@ const DigitalIDGenerationPage = () => {
     );
   }
 
+  // Digital ID Creation Form
   return (
     <div className="digital-id-page">
-      <div className="generation-wizard">
-        <div className="wizard-header">
-          <h1>🛂 Generate Your Digital Travel ID</h1>
-          <p>Create your DigiYatra-style digital identity for seamless travel</p>
-          <div className="progress-steps">
-            <div className={`step ${step >= 1 ? 'active' : ''} ${step > 1 ? 'completed' : ''}`}>
-              1. Personal Info
-            </div>
-            <div className={`step ${step >= 2 ? 'active' : ''} ${step > 2 ? 'completed' : ''}`}>
-              2. Documents
-            </div>
-            <div className={`step ${step >= 3 ? 'active' : ''} ${step > 3 ? 'completed' : ''}`}>
-              3. Travel Info
-            </div>
-            <div className={`step ${step >= 4 ? 'active' : ''} ${step > 4 ? 'completed' : ''}`}>
-              4. Security
-            </div>
+      <div className="form-container">
+        <div className="form-header">
+          <h1>Generate Digital ID</h1>
+          <div className="step-indicator">
+            <span className={step >= 1 ? 'active' : ''}>1</span>
+            <span className={step >= 2 ? 'active' : ''}>2</span>
+            <span className={step >= 3 ? 'active' : ''}>3</span>
+            <span className={step >= 4 ? 'active' : ''}>4</span>
           </div>
         </div>
 
-        <div className="wizard-body">
-          {step === 1 && (
-            <div className="form-step">
-              <h2>Personal Information</h2>
-              <p className="step-description">
-                Please provide your basic personal details as they appear on your official documents.
-              </p>
-              
-              <div className="form-grid">
-                <div className="form-group">
-                  <label>First Name *</label>
-                  <input
-                    type="text"
-                    value={formData.personalInfo.firstName}
-                    onChange={(e) => handleInputChange('personalInfo', 'firstName', e.target.value)}
-                    className={errors['personalInfo.firstName'] ? 'error' : ''}
-                    required
-                  />
-                  {errors['personalInfo.firstName'] && (
-                    <span className="error-message">{errors['personalInfo.firstName']}</span>
-                  )}
+        {/* Step 1: Personal Information */}
+        {step === 1 && (
+          <div className="form-step">
+            <h2>Personal Information</h2>
+            
+            <div className="form-group">
+              <label>Profile Photo (Optional)</label>
+              <div className="file-upload-area">
+                <button 
+                  type="button"
+                  className="upload-btn"
+                  onClick={() => document.getElementById('photo-input').click()}
+                >
+                  📷 Upload Photo
+                </button>
+                <input
+                  id="photo-input"
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => {
+                    const file = e.target.files[0];
+                    if (file) {
+                      console.log('📷 Photo selected:', file.name);
+                      handleFileUpload(file, 'personalInfo', 'photo');
+                    }
+                  }}
+                  style={{ display: 'none' }}
+                />
+                <small>JPG, PNG, GIF or WebP (Max 5MB)</small>
+              </div>
+              {formData.personalInfo.photo && (
+                <div className="file-preview">
+                  <img src={formData.personalInfo.photo} alt="Preview" />
+                  <button onClick={() => handleInputChange('personalInfo', 'photo', null)}>
+                    ❌ Remove
+                  </button>
                 </div>
+              )}
+              {errors['personalInfo.photo'] && (
+                <span className="error">{errors['personalInfo.photo']}</span>
+              )}
+            </div>
 
-                <div className="form-group">
-                  <label>Last Name *</label>
-                  <input
-                    type="text"
-                    value={formData.personalInfo.lastName}
-                    onChange={(e) => handleInputChange('personalInfo', 'lastName', e.target.value)}
-                    className={errors['personalInfo.lastName'] ? 'error' : ''}
-                    required
-                  />
-                  {errors['personalInfo.lastName'] && (
-                    <span className="error-message">{errors['personalInfo.lastName']}</span>
-                  )}
-                </div>
+            <div className="form-row">
+              <div className="form-group">
+                <label>First Name *</label>
+                <input
+                  type="text"
+                  value={formData.personalInfo.firstName}
+                  onChange={(e) => handleInputChange('personalInfo', 'firstName', e.target.value)}
+                  placeholder="Enter first name"
+                />
+                {errors['personalInfo.firstName'] && (
+                  <span className="error">{errors['personalInfo.firstName']}</span>
+                )}
+              </div>
 
-                <div className="form-group">
-                  <label>Date of Birth *</label>
-                  <input
-                    type="date"
-                    value={formData.personalInfo.dateOfBirth}
-                    onChange={(e) => handleInputChange('personalInfo', 'dateOfBirth', e.target.value)}
-                    className={errors['personalInfo.dateOfBirth'] ? 'error' : ''}
-                    max={new Date().toISOString().split('T')[0]}
-                    required
-                  />
-                  {errors['personalInfo.dateOfBirth'] && (
-                    <span className="error-message">{errors['personalInfo.dateOfBirth']}</span>
-                  )}
-                </div>
-
-                <div className="form-group">
-                  <label>Gender *</label>
-                  <select
-                    value={formData.personalInfo.gender}
-                    onChange={(e) => handleInputChange('personalInfo', 'gender', e.target.value)}
-                    className={errors['personalInfo.gender'] ? 'error' : ''}
-                    required
-                  >
-                    <option value="">Select Gender</option>
-                    <option value="male">Male</option>
-                    <option value="female">Female</option>
-                    <option value="other">Other</option>
-                  </select>
-                  {errors['personalInfo.gender'] && (
-                    <span className="error-message">{errors['personalInfo.gender']}</span>
-                  )}
-                </div>
-
-                <div className="form-group">
-                  <label>Nationality *</label>
-                  <input
-                    type="text"
-                    value={formData.personalInfo.nationality}
-                    onChange={(e) => handleInputChange('personalInfo', 'nationality', e.target.value)}
-                    className={errors['personalInfo.nationality'] ? 'error' : ''}
-                    required
-                  />
-                  {errors['personalInfo.nationality'] && (
-                    <span className="error-message">{errors['personalInfo.nationality']}</span>
-                  )}
-                </div>
-
-                <div className="form-group full-width">
-                  <label>Upload Photo (Optional)</label>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={(e) => handleFileUpload(e.target.files[0], 'personalInfo', 'photo')}
-                  />
-                  <small>Passport-size photo (recommended, max 5MB)</small>
-                  {errors['personalInfo.photo'] && (
-                    <span className="error-message">{errors['personalInfo.photo']}</span>
-                  )}
-                </div>
+              <div className="form-group">
+                <label>Last Name *</label>
+                <input
+                  type="text"
+                  value={formData.personalInfo.lastName}
+                  onChange={(e) => handleInputChange('personalInfo', 'lastName', e.target.value)}
+                  placeholder="Enter last name"
+                />
+                {errors['personalInfo.lastName'] && (
+                  <span className="error">{errors['personalInfo.lastName']}</span>
+                )}
               </div>
             </div>
-          )}
 
-          {step === 2 && (
-            <div className="form-step">
-              <h2>KYC Document</h2>
-              <p className="step-description">
-                Upload your identification document for verification.
-              </p>
-              
-              <div className="form-grid">
-                <div className="form-group">
-                  <label>Document Type *</label>
-                  <select
-                    value={formData.kycDocuments[0].documentType}
-                    onChange={(e) => handleDocumentChange(0, 'documentType', e.target.value)}
-                  >
-                    <option value="passport">Passport</option>
-                    <option value="visa">Visa</option>
-                    <option value="national_id">National ID</option>
-                    <option value="driving_license">Driving License</option>
-                  </select>
-                </div>
+            <div className="form-row">
+              <div className="form-group">
+                <label>Date of Birth *</label>
+                <input
+                  type="date"
+                  value={formData.personalInfo.dateOfBirth}
+                  onChange={(e) => handleInputChange('personalInfo', 'dateOfBirth', e.target.value)}
+                  max={new Date().toISOString().split('T')[0]}
+                />
+                {errors['personalInfo.dateOfBirth'] && (
+                  <span className="error">{errors['personalInfo.dateOfBirth']}</span>
+                )}
+              </div>
 
-                <div className="form-group">
-                  <label>Document Number *</label>
-                  <input
-                    type="text"
-                    value={formData.kycDocuments[0].documentNumber}
-                    onChange={(e) => handleDocumentChange(0, 'documentNumber', e.target.value)}
-                    className={errors['kycDocuments[0].documentNumber'] ? 'error' : ''}
-                    required
-                  />
-                  {errors['kycDocuments[0].documentNumber'] && (
-                    <span className="error-message">{errors['kycDocuments[0].documentNumber']}</span>
-                  )}
-                </div>
-
-                <div className="form-group">
-                  <label>Issuing Country *</label>
-                  <input
-                    type="text"
-                    value={formData.kycDocuments[0].issuingCountry}
-                    onChange={(e) => handleDocumentChange(0, 'issuingCountry', e.target.value)}
-                    className={errors['kycDocuments[0].issuingCountry'] ? 'error' : ''}
-                    required
-                  />
-                  {errors['kycDocuments[0].issuingCountry'] && (
-                    <span className="error-message">{errors['kycDocuments[0].issuingCountry']}</span>
-                  )}
-                </div>
-
-                <div className="form-group">
-                  <label>Issue Date (Optional)</label>
-                  <input
-                    type="date"
-                    value={formData.kycDocuments[0].issueDate}
-                    onChange={(e) => handleDocumentChange(0, 'issueDate', e.target.value)}
-                    className={errors['kycDocuments[0].issueDate'] ? 'error' : ''}
-                    max={new Date().toISOString().split('T')[0]}
-                  />
-                  {errors['kycDocuments[0].issueDate'] && (
-                    <span className="error-message">{errors['kycDocuments[0].issueDate']}</span>
-                  )}
-                </div>
-
-                <div className="form-group">
-                  <label>Expiry Date *</label>
-                  <input
-                    type="date"
-                    value={formData.kycDocuments[0].expiryDate}
-                    onChange={(e) => handleDocumentChange(0, 'expiryDate', e.target.value)}
-                    className={errors['kycDocuments[0].expiryDate'] ? 'error' : ''}
-                    min={new Date().toISOString().split('T')[0]}
-                    required
-                  />
-                  {errors['kycDocuments[0].expiryDate'] && (
-                    <span className="error-message">{errors['kycDocuments[0].expiryDate']}</span>
-                  )}
-                </div>
-
-                <div className="form-group full-width">
-                  <label>Upload Document Scan (Optional)</label>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={(e) => handleFileUpload(e.target.files[0], 'kycDocument', 'documentImage')}
-                  />
-                  <small>Clear scan of your document (max 5MB)</small>
-                  {errors['kycDocument.documentImage'] && (
-                    <span className="error-message">{errors['kycDocument.documentImage']}</span>
-                  )}
-                </div>
+              <div className="form-group">
+                <label>Gender *</label>
+                <select
+                  value={formData.personalInfo.gender}
+                  onChange={(e) => handleInputChange('personalInfo', 'gender', e.target.value)}
+                >
+                  <option value="">Select gender</option>
+                  <option value="male">Male</option>
+                  <option value="female">Female</option>
+                  <option value="other">Other</option>
+                </select>
+                {errors['personalInfo.gender'] && (
+                  <span className="error">{errors['personalInfo.gender']}</span>
+                )}
               </div>
             </div>
-          )}
 
-          {step === 3 && (
-            <div className="form-step">
-              <h2>Travel Information</h2>
-              <p className="step-description">
-                Provide your travel details (optional but recommended for faster processing).
-              </p>
-              
-              <div className="form-grid">
-                <div className="form-group">
-                  <label>Entry Point</label>
-                  <input
-                    type="text"
-                    value={formData.travelInfo.entryPoint}
-                    onChange={(e) => handleInputChange('travelInfo', 'entryPoint', e.target.value)}
-                    placeholder="e.g., Mumbai Airport"
-                  />
-                </div>
+            <div className="form-group">
+              <label>Nationality *</label>
+              <input
+                type="text"
+                value={formData.personalInfo.nationality}
+                onChange={(e) => handleInputChange('personalInfo', 'nationality', e.target.value)}
+                placeholder="e.g., Indian, American"
+              />
+              {errors['personalInfo.nationality'] && (
+                <span className="error">{errors['personalInfo.nationality']}</span>
+              )}
+            </div>
 
-                <div className="form-group">
-                  <label>Entry Type</label>
-                  <select
-                    value={formData.travelInfo.entryType}
-                    onChange={(e) => handleInputChange('travelInfo', 'entryType', e.target.value)}
-                  >
-                    <option value="airport">Airport</option>
-                    <option value="seaport">Seaport</option>
-                    <option value="land_border">Land Border</option>
-                  </select>
-                </div>
+            <div className="form-actions">
+              <button onClick={() => navigate('/dashboard')} className="btn-secondary">
+                Cancel
+              </button>
+              <button onClick={handleNext} className="btn-primary">
+                Next →
+              </button>
+            </div>
+          </div>
+        )}
 
-                <div className="form-group">
-                  <label>Entry Date</label>
-                  <input
-                    type="date"
-                    value={formData.travelInfo.entryDate}
-                    onChange={(e) => handleInputChange('travelInfo', 'entryDate', e.target.value)}
-                  />
-                </div>
+        {/* Step 2: KYC Documents */}
+        {step === 2 && (
+          <div className="form-step">
+            <h2>KYC Documents</h2>
+            
+            <div className="form-group">
+              <label>Document Type *</label>
+              <select
+                value={formData.kycDocuments[0].documentType}
+                onChange={(e) => handleDocumentChange(0, 'documentType', e.target.value)}
+              >
+                <option value="passport">Passport</option>
+                <option value="visa">Visa</option>
+                <option value="national_id">National ID</option>
+                <option value="driving_license">Driving License</option>
+              </select>
+            </div>
 
-                <div className="form-group">
-                  <label>Expected Exit Date</label>
-                  <input
-                    type="date"
-                    value={formData.travelInfo.exitDate}
-                    onChange={(e) => handleInputChange('travelInfo', 'exitDate', e.target.value)}
-                    min={formData.travelInfo.entryDate || new Date().toISOString().split('T')[0]}
-                  />
-                </div>
+            <div className="form-group">
+              <label>Document Number *</label>
+              <input
+                type="text"
+                value={formData.kycDocuments[0].documentNumber}
+                onChange={(e) => handleDocumentChange(0, 'documentNumber', e.target.value)}
+                placeholder="Enter document number"
+              />
+              {errors['kycDocuments[0].documentNumber'] && (
+                <span className="error">{errors['kycDocuments[0].documentNumber']}</span>
+              )}
+            </div>
 
-                <div className="form-group">
-                  <label>Purpose of Visit</label>
-                  <select
-                    value={formData.travelInfo.purposeOfVisit}
-                    onChange={(e) => handleInputChange('travelInfo', 'purposeOfVisit', e.target.value)}
-                  >
-                    <option value="tourism">Tourism</option>
-                    <option value="business">Business</option>
-                    <option value="education">Education</option>
-                    <option value="medical">Medical</option>
-                    <option value="other">Other</option>
-                  </select>
-                </div>
+            <div className="form-group">
+              <label>Issuing Country *</label>
+              <input
+                type="text"
+                value={formData.kycDocuments[0].issuingCountry}
+                onChange={(e) => handleDocumentChange(0, 'issuingCountry', e.target.value)}
+                placeholder="e.g., India, USA"
+              />
+              {errors['kycDocuments[0].issuingCountry'] && (
+                <span className="error">{errors['kycDocuments[0].issuingCountry']}</span>
+              )}
+            </div>
 
-                <div className="form-group full-width">
-                  <label>Accommodation</label>
-                  <input
-                    type="text"
-                    value={formData.travelInfo.accommodation}
-                    onChange={(e) => handleInputChange('travelInfo', 'accommodation', e.target.value)}
-                    placeholder="Hotel name or address"
-                  />
-                </div>
+            <div className="form-row">
+              <div className="form-group">
+                <label>Issue Date</label>
+                <input
+                  type="date"
+                  value={formData.kycDocuments[0].issueDate}
+                  onChange={(e) => handleDocumentChange(0, 'issueDate', e.target.value)}
+                  max={new Date().toISOString().split('T')[0]}
+                />
+                {errors['kycDocuments[0].issueDate'] && (
+                  <span className="error">{errors['kycDocuments[0].issueDate']}</span>
+                )}
+              </div>
+
+              <div className="form-group">
+                <label>Expiry Date *</label>
+                <input
+                  type="date"
+                  value={formData.kycDocuments[0].expiryDate}
+                  onChange={(e) => handleDocumentChange(0, 'expiryDate', e.target.value)}
+                  min={new Date().toISOString().split('T')[0]}
+                />
+                {errors['kycDocuments[0].expiryDate'] && (
+                  <span className="error">{errors['kycDocuments[0].expiryDate']}</span>
+                )}
               </div>
             </div>
-          )}
 
-          {step === 4 && (
-            <div className="form-step">
-              <h2>Security PIN</h2>
-              <p className="step-description">
-                Set a 6-digit PIN to secure your Digital ID. This PIN will be required for verification at checkpoints.
-              </p>
-              
-              <div className="form-grid">
-                <div className="form-group">
-                  <label>Access PIN (6 digits) *</label>
-                  <input
-                    type="password"
-                    value={formData.accessPin}
-                    onChange={(e) => {
-                      const value = e.target.value.replace(/\D/g, '').slice(0, 6);
-                      setFormData(prev => ({ ...prev, accessPin: value }));
-                      setErrors(prev => ({ ...prev, accessPin: null }));
-                    }}
-                    placeholder="Enter 6-digit PIN"
-                    maxLength={6}
-                    className={errors['accessPin'] ? 'error' : ''}
-                    required
-                  />
-                  <small>Remember this PIN - you'll need it at checkpoints</small>
-                  {errors['accessPin'] && (
-                    <span className="error-message">{errors['accessPin']}</span>
+            <div className="form-group">
+              <label>Document Image/PDF (Optional)</label>
+              <div className="file-upload-area">
+                <button 
+                  type="button"
+                  className="upload-btn"
+                  onClick={() => document.getElementById('document-input').click()}
+                >
+                  📄 Upload Document
+                </button>
+                <input
+                  id="document-input"
+                  type="file"
+                  accept="image/*,application/pdf"
+                  onChange={(e) => {
+                    const file = e.target.files[0];
+                    if (file) {
+                      console.log('📄 Document selected:', file.name);
+                      handleFileUpload(file, 'kycDocuments', 'documentImage', 0);
+                    }
+                  }}
+                  style={{ display: 'none' }}
+                />
+                <small>JPG, PNG, PDF (Max 10MB)</small>
+              </div>
+              {formData.kycDocuments[0]?.documentImage && (
+                <div className="file-preview">
+                  {formData.kycDocuments[0].documentImage.startsWith('data:application/pdf') ? (
+                    <div className="pdf-preview">
+                      <span>📄 PDF Document Uploaded</span>
+                    </div>
+                  ) : (
+                    <img src={formData.kycDocuments[0].documentImage} alt="Document" />
                   )}
+                  <button onClick={() => handleDocumentChange(0, 'documentImage', null)}>
+                    ❌ Remove
+                  </button>
                 </div>
+              )}
+              {errors['kycDocuments[0].documentImage'] && (
+                <span className="error">{errors['kycDocuments[0].documentImage']}</span>
+              )}
+            </div>
+
+            <div className="form-actions">
+              <button onClick={handleBack} className="btn-secondary">
+                ← Back
+              </button>
+              <button onClick={handleNext} className="btn-primary">
+                Next →
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Step 3: Travel Information */}
+        {step === 3 && (
+          <div className="form-step">
+            <h2>Travel Information</h2>
+            
+            <div className="form-group">
+              <label>Entry Point</label>
+              <input
+                type="text"
+                value={formData.travelInfo.entryPoint}
+                onChange={(e) => handleInputChange('travelInfo', 'entryPoint', e.target.value)}
+                placeholder="e.g., Mumbai International Airport"
+              />
+            </div>
+
+            <div className="form-row">
+              <div className="form-group">
+                <label>Entry Type</label>
+                <select
+                  value={formData.travelInfo.entryType}
+                  onChange={(e) => handleInputChange('travelInfo', 'entryType', e.target.value)}
+                >
+                  <option value="airport">Airport</option>
+                  <option value="seaport">Seaport</option>
+                  <option value="land_border">Land Border</option>
+                </select>
               </div>
 
-              <div className="terms-section">
-                <label className="checkbox-label">
-                  <input type="checkbox" required />
-                  <span>I agree to the terms and conditions and privacy policy</span>
-                </label>
-                <label className="checkbox-label">
-                  <input type="checkbox" required />
-                  <span>I consent to share my travel data with authorized agencies for verification</span>
-                </label>
+              <div className="form-group">
+                <label>Purpose of Visit</label>
+                <select
+                  value={formData.travelInfo.purposeOfVisit}
+                  onChange={(e) => handleInputChange('travelInfo', 'purposeOfVisit', e.target.value)}
+                >
+                  <option value="tourism">Tourism</option>
+                  <option value="business">Business</option>
+                  <option value="education">Education</option>
+                  <option value="medical">Medical</option>
+                  <option value="other">Other</option>
+                </select>
               </div>
             </div>
-          )}
-        </div>
 
-        <div className="wizard-footer">
-          {step > 1 && (
-            <button onClick={() => setStep(step - 1)} className="btn-secondary">
-              Previous
-            </button>
-          )}
-          
-          {step < 4 ? (
-            <button onClick={handleNext} className="btn-primary">
-              Next
-            </button>
-          ) : (
-            <button onClick={handleSubmit} className="btn-primary" disabled={loading}>
-              {loading ? 'Generating...' : 'Generate Digital ID'}
-            </button>
-          )}
-        </div>
+            <div className="form-row">
+              <div className="form-group">
+                <label>Entry Date</label>
+                <input
+                  type="date"
+                  value={formData.travelInfo.entryDate}
+                  onChange={(e) => handleInputChange('travelInfo', 'entryDate', e.target.value)}
+                />
+              </div>
+
+              <div className="form-group">
+                <label>Exit Date</label>
+                <input
+                  type="date"
+                  value={formData.travelInfo.exitDate}
+                  onChange={(e) => handleInputChange('travelInfo', 'exitDate', e.target.value)}
+                  min={formData.travelInfo.entryDate}
+                />
+              </div>
+            </div>
+
+            <div className="form-group">
+              <label>Accommodation</label>
+              <input
+                type="text"
+                value={formData.travelInfo.accommodation}
+                onChange={(e) => handleInputChange('travelInfo', 'accommodation', e.target.value)}
+                placeholder="Hotel name or address"
+              />
+            </div>
+
+            <div className="form-actions">
+              <button onClick={handleBack} className="btn-secondary">
+                ← Back
+              </button>
+              <button onClick={handleNext} className="btn-primary">
+                Next →
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Step 4: Security */}
+        {step === 4 && (
+          <div className="form-step">
+            <h2>Set Access PIN</h2>
+            <p>Create a 6-digit PIN to secure your Digital ID</p>
+            
+            <div className="form-group">
+              <label>6-Digit PIN *</label>
+              <input
+                type="password"
+                maxLength="6"
+                value={formData.accessPin}
+                onChange={(e) => {
+                  const value = e.target.value.replace(/\D/g, '');
+                  setFormData(prev => ({...prev, accessPin: value}));
+                  setErrors(prev => ({...prev, accessPin: null}));
+                }}
+                placeholder="Enter 6-digit PIN"
+              />
+              {errors['accessPin'] && (
+                <span className="error">{errors['accessPin']}</span>
+              )}
+            </div>
+
+            <div className="form-actions">
+              <button onClick={handleBack} className="btn-secondary">
+                ← Back
+              </button>
+              <button 
+                onClick={handleSubmit} 
+                className="btn-primary"
+                disabled={loading}
+              >
+                {loading ? 'Generating...' : '✅ Generate Digital ID'}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
