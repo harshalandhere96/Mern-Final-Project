@@ -16,6 +16,12 @@ const Emergency = lazy(() => import('@pages/Emergency/EmergencyPage'));
 const NotFound = lazy(() => import('@pages/NotFound/NotFound'));
 const DigitalIDGenerationPage = lazy(() => import('@pages/DigitalID/DigitalIDGenerationPage'));
 
+// 🚕 CAB BOOKING PAGES (NEW!)
+const CabBooking = lazy(() => import('@pages/CabBooking/CabBookingEnhanced'));
+const DriverRegistration = lazy(() => import('@pages/Driver/DriverRegistration'));
+const DriverLogin = lazy(() => import('@pages/Driver/DriverLogin'));
+const DriverDashboard = lazy(() => import('@pages/Driver/DriverDashboard'));
+
 const AppRoutes = () => {
   return (
     <Suspense fallback={<LoadingScreen />}>
@@ -44,6 +50,25 @@ const AppRoutes = () => {
           element={
             <PublicRoute restricted>
               <SignUp />
+            </PublicRoute>
+          } 
+        />
+        
+        {/* 🚕 CAB BOOKING - Public Routes */}
+        <Route 
+          path="/driver/register" 
+          element={
+            <PublicRoute restricted>
+              <DriverRegistration />
+            </PublicRoute>
+          } 
+        />
+        
+        <Route 
+          path="/driver/login" 
+          element={
+            <PublicRoute restricted>
+              <DriverLogin />
             </PublicRoute>
           } 
         />
@@ -86,19 +111,38 @@ const AppRoutes = () => {
         />
 
         <Route 
-        path="/generate-digital-id" 
-        element={
-        <PrivateRoute>
-          <DigitalIDGenerationPage />
-        </PrivateRoute>
-      } 
-      />
+          path="/generate-digital-id" 
+          element={
+            <PrivateRoute>
+              <DigitalIDGenerationPage />
+            </PrivateRoute>
+          } 
+        />
         
         <Route 
           path="/emergency" 
           element={
             <PrivateRoute>
               <Emergency />
+            </PrivateRoute>
+          } 
+        />
+        
+        {/* 🚕 CAB BOOKING - Protected Routes */}
+        <Route 
+          path="/cab-booking" 
+          element={
+            <PrivateRoute>
+              <CabBooking />
+            </PrivateRoute>
+          } 
+        />
+        
+        <Route 
+          path="/driver/dashboard" 
+          element={
+            <PrivateRoute>
+              <DriverDashboard />
             </PrivateRoute>
           } 
         />

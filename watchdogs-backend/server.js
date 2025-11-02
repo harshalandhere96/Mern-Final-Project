@@ -23,6 +23,9 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Serve uploaded files (for driver documents)
+app.use('/uploads', express.static('uploads'));
+
 // MongoDB Connection
 mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/watchdogs', {
   useNewUrlParser: true,
@@ -35,6 +38,7 @@ mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/watchdogs
 io.on('connection', (socket) => {
   console.log('👤 User connected:', socket.id);
 
+  // Existing socket events
   socket.on('location:update', (data) => {
     socket.broadcast.emit('location:new', data);
   });
@@ -49,6 +53,101 @@ io.on('connection', (socket) => {
 
   socket.on('emergency:trigger', (data) => {
     io.emit('emergency:alert', data);
+  });
+
+ 
+  
+  // Driver joins their room
+  socket.on('driver:join', (driverId) => {
+    socket.join(`driver:${driverId}`);
+    console.log(`🚗 Driver ${driverId} joined their room`);
+  });
+  
+  // User joins ride room
+  socket.on('ride:join', (rideId) => {
+    socket.join(`ride:${rideId}`);
+    console.log(`👤 User joined ride room: ${rideId}`);
+  });
+  
+  // Driver location update (real-time tracking)
+  socket.on('driver:location', async (data) => {
+    const { driverId, latitude, longitude, rideId, speed, heading } = data;
+    
+    console.log(`📍 Driver ${driverId} location update:`, { latitude, longitude });
+    
+    // Broadcast to ride room (user sees driver moving)
+    io.to(`ride:${rideId}`).emit('driver:location:update', {
+      latitude,
+      longitude,
+      speed,
+      heading,
+      timestamp: new Date()
+    });
+    
+    // Update location in database
+    try {
+      const Ride = require('./models/Ride');
+      const ride = await Ride.findById(rideId);
+      if (ride) {
+        ride.updateDriverLocation(longitude, latitude);
+        ride.addTrackingPoint([longitude, latitude], speed, heading);
+        await ride.save();
+      }
+    } catch (error) {
+      console.error('❌ Error updating driver location:', error);
+    }
+  });
+  
+  // Notify driver of new ride request
+  socket.on('ride:request', (data) => {
+    const { driverId, rideDetails } = data;
+    io.to(`driver:${driverId}`).emit('new-ride-request', rideDetails);
+    console.log(`🔔 Sent ride request to driver ${driverId}`);
+  });
+  
+  // Driver accepts ride
+  socket.on('ride:accept', (data) => {
+    const { rideId, driverDetails } = data;
+    io.to(`ride:${rideId}`).emit('driver-accepted', driverDetails);
+    console.log(`✅ Driver accepted ride ${rideId}`);
+  });
+  
+  // Driver arrived at pickup
+  socket.on('ride:arrived', (data) => {
+    const { rideId } = data;
+    io.to(`ride:${rideId}`).emit('driver-arrived', data);
+    console.log(`📍 Driver arrived at pickup for ride ${rideId}`);
+  });
+  
+  // Ride started
+  socket.on('ride:started', (data) => {
+    const { rideId } = data;
+    io.to(`ride:${rideId}`).emit('ride-started', data);
+    console.log(`🏁 Ride ${rideId} started`);
+  });
+  
+  // Ride completed
+  socket.on('ride:completed', (data) => {
+    const { rideId, fare } = data;
+    io.to(`ride:${rideId}`).emit('ride-completed', { fare });
+    console.log(`✅ Ride ${rideId} completed`);
+  });
+  
+  // Ride cancelled
+  socket.on('ride:cancelled', (data) => {
+    const { rideId, cancelledBy, reason } = data;
+    io.to(`ride:${rideId}`).emit('ride-cancelled', { cancelledBy, reason });
+    if (data.driverId) {
+      io.to(`driver:${data.driverId}`).emit('ride-cancelled', { rideId, reason });
+    }
+    console.log(`❌ Ride ${rideId} cancelled by ${cancelledBy}`);
+  });
+  
+  // No driver found
+  socket.on('ride:no-driver', (data) => {
+    const { rideId } = data;
+    io.to(`ride:${rideId}`).emit('no-driver-found');
+    console.log(`⚠️ No driver found for ride ${rideId}`);
   });
 
   socket.on('disconnect', () => {
@@ -71,6 +170,10 @@ app.use('/api/digital-id', require('./routes/digitalId'));
 app.use('/api/alerts', require('./routes/alerts'));
 app.use('/api/admin', require('./routes/admin'));
 
+// CAB BOOKING ROUTES (NEW!)
+app.use('/api/rides', require('./routes/rides'));
+app.use('/api/driver/auth', require('./routes/driver/auth'));
+
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', message: 'WatchDogs API is running' });
@@ -91,4 +194,5 @@ const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`🌐 Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`🚕 Cab booking enabled with real-time tracking`);
 });
